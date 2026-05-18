@@ -1,0 +1,16 @@
+name: Compilation Windows
+on: [push]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - run: pip install pyinstaller openpyxl flask flask-cors
+    - run: pyinstaller --onedir --windowed serveur_spc_V2.py
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Application_SPC_Windows
+        path: dist/serveur_spc_V2/

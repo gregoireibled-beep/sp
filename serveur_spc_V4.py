@@ -139,7 +139,29 @@ def recuperer_historique():
     except Exception as e:
         print(f"❌ Erreur Lecture Historique : {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
+# =====================================================================
+# 5. ROUTE POUR LES IMAGE
+# =====================================================================
 
+@app.route('/images/<nom_image>')
+def servir_images(nom_image):
+    """Permet aux pages HTML d'afficher les images du projet"""
+    # On cherche l'image dans un sous-dossier nommé 'images' à côté du .exe
+    chemin_image = os.path.join(DOSSIER_APP, "images", nom_image)
+    
+    # Si le sous-dossier n'existe pas, on cherche à la racine du .exe
+    if not os.path.exists(chemin_image):
+        chemin_image = os.path.join(DOSSIER_APP, nom_image)
+        
+    if not os.path.exists(chemin_image):
+        return f"Image introuvable : {nom_image}", 404
+        
+    # On détecte l'extension pour envoyer le bon type de contenu au navigateur
+    ext = os.path.splitext(nom_image)[1].lower()
+    mimetype = "image/png" if ext == ".png" else "image/jpeg"
+    
+    with open(chemin_image, 'rb') as f:
+        return f.read(), 200, {'Content-Type': mimetype}
 
 # =====================================================================
 # 4. SCRIPT DE DÉMARRAGE

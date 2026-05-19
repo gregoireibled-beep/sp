@@ -145,23 +145,31 @@ def recuperer_historique():
 
 @app.route('/images/<nom_image>')
 def servir_images(nom_image):
-    """Permet aux pages HTML d'afficher les images du projet"""
-    # On cherche l'image dans un sous-dossier nommé 'images' à côté du .exe
-    chemin_image = os.path.join(DOSSIER_APP, "images", nom_image)
+    """Va chercher l'image de la filière directement sur le réseau d'usine W:"""
+    # 1. On définit le dossier source sur le réseau W:
+    dossier_images = "W:/Consignes/DFN/Extrusion/SPC/Image"
     
-    # Si le sous-dossier n'existe pas, on cherche à la racine du .exe
-    if not os.path.exists(chemin_image):
-        chemin_image = os.path.join(DOSSIER_APP, nom_image)
-        
-    if not os.path.exists(chemin_image):
-        return f"Image introuvable : {nom_image}", 404
-        
-    # On détecte l'extension pour envoyer le bon type de contenu au navigateur
-    ext = os.path.splitext(nom_image)[1].lower()
-    mimetype = "image/png" if ext == ".png" else "image/jpeg"
+    # 2. Sécurité : Extraction du nom sans l'extension pour tester .jpg et .jpeg
+    nom_base = os.path.splitext(nom_image)[0]
     
-    with open(chemin_image, 'rb') as f:
-        return f.read(), 200, {'Content-Type': mimetype}
+    # On teste le chemin avec .jpg
+    chemin_image = os.path.join(dossier_images, f"{nom_base}.jpg")
+    
+    # Si le .jpg n'existe pas, on tente le .jpeg
+    if not os.path.exists(chemin_image):
+        chemin_image = os.path.join(dossier_images, f"{nom_base}.jpeg")
+        
+    # 3. Si l'image existe enfin, on la sert au navigateur
+    if os.path.exists(chemin_image):
+        ext = os.path.splitext(chemin_image)[1].lower()
+        mimetype = "image/jpeg" # .jpg et .jpeg utilisent le même mimetype
+        
+        with open(chemin_image, 'rb') as f:
+            return f.read(), 200, {'Content-Type': mimetype}
+            
+    # 4. En cas d'échec total, on écrit l'erreur dans la console de l'exécutable pour le diagnostic
+    print(f"❌ Image de filière introuvable sur le réseau W: {nom_base}.jpg (ou .jpeg)")
+    return f"Image introuvable dans le dossier {dossier_images}", 404
 
 # =====================================================================
 # 4. SCRIPT DE DÉMARRAGE

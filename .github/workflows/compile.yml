@@ -4,7 +4,7 @@ on: [push]
 
 jobs:
   build:
-    runs-on: windows-latest  # Indispensable pour créer un .EXE Windows
+    runs-on: windows-latest
 
     steps:
     - name: Récupérer le code du dépôt
@@ -23,3 +23,24 @@ jobs:
     - name: Compiler le script Python en EXE
       run: |
         pyinstaller --onefile serveur_spc_V4.py
+        # REMARK: Remplacez 'app.py' ci-dessus par le nom exact de votre script Python si différent (ex: serveur.py)
+
+    - name: Créer l'archive ZIP complète du projet
+      run: |
+        # Crée un dossier temporaire pour l'envoi
+        mkdir spc_release
+        # Copie l'exécutable généré par PyInstaller
+        copy dist\*.exe spc_release\
+        # Copie vos fichiers d'interface HTML et de configuration
+        copy SPC.html spc_release\
+        copy historique_SPC.html spc_release\
+        copy articles.js spc_release\
+        # Compresse le dossier en fichier ZIP sous Windows
+        Compress-Archive -Path spc_release\* -DestinationPath Application_SPC.zip
+
+    - name: Mettre à disposition le fichier ZIP (Artifact)
+      uses: actions/upload-artifact@v4
+      with:
+        name: Application_SPC_Windows
+        path: Application_SPC.zip
+        retention-days: 7

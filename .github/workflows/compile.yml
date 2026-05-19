@@ -23,20 +23,29 @@ jobs:
     - name: Compiler le script Python en EXE
       run: |
         pyinstaller --onefile serveur_spc_V4.py
-        # REMARK: Remplacez 'app.py' ci-dessus par le nom exact de votre script Python si différent (ex: serveur.py)
+        # REMARQUE : Remplacez 'app.py' par le nom exact de votre script Python s'il s'appelle autrement (ex: serveur.py)
 
     - name: Créer l'archive ZIP complète du projet
+      shell: powershell
       run: |
-        # Crée un dossier temporaire pour l'envoi
-        mkdir spc_release
-        # Copie l'exécutable généré par PyInstaller
-        copy dist\*.exe spc_release\
-        # Copie vos fichiers d'interface HTML et de configuration
-        copy SPC.html spc_release\
-        copy historique_SPC.html spc_release\
-        copy articles.js spc_release\
-        # Compresse le dossier en fichier ZIP sous Windows
-        Compress-Archive -Path spc_release\* -DestinationPath Application_SPC.zip
+        # 1. Crée le dossier temporaire de release
+        New-Item -ItemType Directory -Force -Path spc_release
+
+        # 2. Copie l'exécutable généré par PyInstaller
+        Copy-Item -Path "dist\*.exe" -Destination "spc_release\" -ErrorAction SilentlyContinue
+
+        # 3. Recherche intelligente et automatique des fichiers de l'interface (gère l'emplacement et la casse)
+        Get-ChildItem -Recurse -Include "*spc.html", "*articles.js" | ForEach-Object {
+            # On évite de copier les fichiers qui seraient déjà dans le dossier de release
+            if ($_.FullName -notlike "*spc_release*") {
+                Copy-Item -Path $_.FullName -Destination "spc_release\" -Force
+                Write-Host "Fichier copié avec succès : $($_.Name)"
+            }
+        }
+
+        # 4. Compression du dossier en fichier ZIP
+        Compress-Archive -Path spc_release\* -DestinationPath Application_SPC.zip -Force
+        Write-Host "Fichier ZIP créé avec succès."
 
     - name: Mettre à disposition le fichier ZIP (Artifact)
       uses: actions/upload-artifact@v4

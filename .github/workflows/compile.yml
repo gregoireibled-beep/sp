@@ -22,9 +22,7 @@ jobs:
 
     - name: Compiler le script Python en EXE
       run: |
-        pyinstaller --onefile serveur_spc_V4.py
-        # REMARQUE : Remplacez 'app.py' par le nom exact de votre script Python s'il s'appelle autrement (ex: serveur.py)
-
+        pyinstaller --onedir --noconsole --clean serveur_spc_V4.py
     - name: Créer l'archive ZIP complète du projet
       shell: powershell
       run: |

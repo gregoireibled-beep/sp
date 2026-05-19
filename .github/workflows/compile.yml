@@ -30,17 +30,16 @@ jobs:
         # 1. Crée le dossier temporaire de release
         New-Item -ItemType Directory -Force -Path spc_release
 
-        # 2. Copie l'intégralité du dossier généré par PyInstaller (indispensable en mode --onedir)
+        # 2. Copie l'intégralité du dossier généré par PyInstaller
         if (Test-Path "dist\serveur_spc_V4") {
             Copy-Item -Path "dist\serveur_spc_V4\*" -Destination "spc_release\" -Recurse -Force
         }
 
-        # 3. Recherche et copie des fichiers de l'interface HTML/JS
+        # 3. Recherche et copie des fichiers HTML et JS directement à côté de l'exécutable
         Get-ChildItem -Recurse -Include "*spc.html", "*articles.js" | ForEach-Object {
-            # On s'assure de ne pas copier des doublons déjà présents dans les dossiers de build
             if ($_.FullName -notlike "*spc_release*" -and $_.FullName -notlike "*dist*" -and $_.FullName -notlike "*build*") {
                 Copy-Item -Path $_.FullName -Destination "spc_release\" -Force
-                Write-Host "Fichier d'interface copié : $($_.Name)"
+                Write-Host "Fichier d'interface injecté : $($_.Name)"
             }
         }
 

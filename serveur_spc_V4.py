@@ -62,12 +62,10 @@ def recuperer_historique():
     try:
         data = request.json
         filiere = data.get('filiere')
-        
-        # Récupération du dossier cible (doit être identique à celui configuré dans le JavaScript de SPC.html)
-        dossier_cible = "W:/Consignes/DFN/Extrusion/SPC/DEFAUT/"
-        
+        annee = maintenant.getFullYear()
+
         # Si vous utilisez un dossier dynamique par filière comme dans votre JS, décommentez la ligne ci-dessous :
-        # dossier_cible = f"W:/Consignes/DFN/Extrusion/SPC/{filiere}/"
+        dossier_cible = f"W:/Consignes/DFN/Extrusion/SPC/Historique_SPC_Extrusion/{annee}/{filiere}/"
 
         if not os.path.exists(dossier_cible):
             return jsonify({"status": "success", "data": []})

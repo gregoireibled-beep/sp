@@ -98,10 +98,9 @@ def recuperer_historique():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-# --- SCRIPT DE DÉMARRAGE AUTOMATIQUE ---
-def ouvrir_navigateur():
-    path = os.path.abspath(CHEMIN_HTML)
-    webbrowser.open(f"file:///{path}")
+    # --- SCRIPT DE DÉMARRAGE AUTOMATIQUE ---
+    def ouvrir_navigateur():
+    webbrowser.open("http://127.0.0.1:5000/static/SPC.html")
 
 if __name__ == "__main__":
     print("========================================")

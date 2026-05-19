@@ -23,21 +23,24 @@ jobs:
     - name: Compiler le script Python en EXE
       run: |
         pyinstaller --onedir --noconsole --clean serveur_spc_V4.py
+
     - name: Créer l'archive ZIP complète du projet
       shell: powershell
       run: |
         # 1. Crée le dossier temporaire de release
         New-Item -ItemType Directory -Force -Path spc_release
 
-        # 2. Copie l'exécutable généré par PyInstaller
-        Copy-Item -Path "dist\*.exe" -Destination "spc_release\" -ErrorAction SilentlyContinue
+        # 2. Copie l'intégralité du dossier généré par PyInstaller (indispensable en mode --onedir)
+        if (Test-Path "dist\serveur_spc_V4") {
+            Copy-Item -Path "dist\serveur_spc_V4\*" -Destination "spc_release\" -Recurse -Force
+        }
 
-        # 3. Recherche intelligente et automatique des fichiers de l'interface (gère l'emplacement et la casse)
+        # 3. Recherche et copie des fichiers de l'interface HTML/JS
         Get-ChildItem -Recurse -Include "*spc.html", "*articles.js" | ForEach-Object {
-            # On évite de copier les fichiers qui seraient déjà dans le dossier de release
-            if ($_.FullName -notlike "*spc_release*") {
+            # On s'assure de ne pas copier des doublons déjà présents dans les dossiers de build
+            if ($_.FullName -notlike "*spc_release*" -and $_.FullName -notlike "*dist*" -and $_.FullName -notlike "*build*") {
                 Copy-Item -Path $_.FullName -Destination "spc_release\" -Force
-                Write-Host "Fichier copié avec succès : $($_.Name)"
+                Write-Host "Fichier d'interface copié : $($_.Name)"
             }
         }
 

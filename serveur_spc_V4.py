@@ -118,6 +118,7 @@ def recuperer_historique():
         if not os.path.exists(dossier_cible):
             return jsonify({"status": "success", "data": []})
 
+        # Recherche de tous les fichiers Excel du dossier
         fichiers = glob.glob(os.path.join(dossier_cible, "*.xls*"))
         
         toutes_les_mesures = []
@@ -136,7 +137,7 @@ def recuperer_historique():
                 def clean_val(val):
                     return str(val).strip() if val is not None else ""
 
-                # 1. Base fixe commune à tous les profils
+                # 1. Base fixe commune à tous vos fichiers SPC
                 mesure = {
                     "date": str_date,
                     "machine": clean_val(ws.cell(row=2, column=2).value),
@@ -149,16 +150,15 @@ def recuperer_historique():
                     "lot_matiere_broye": clean_val(ws.cell(row=2, column=9).value)
                 }
 
-                # 2. LECTURE DYNAMIQUE DES COTES (Colonnes 10 à la fin du fichier Excel)
-                # La ligne 1 contient le nom des clefs enregistrées (ex: cote1, cote2, etc.)
+                # 2. LECTURE DYNAMIQE DES COTES (De la colonne 10 jusqu'à la fin du fichier)
+                # On associe la valeur de la ligne 2 avec le nom exact de l'entête à la ligne 1
                 for col_idx in range(10, ws.max_column + 1):
-                    clef_cote = ws.cell(row=1, column=col_idx).value
+                    nom_entete = ws.cell(row=1, column=col_idx).value
                     valeur_cote = ws.cell(row=2, column=col_idx).value
                     
-                    if clef_cote:
-                        # Nettoie la clef (ex: transforme "cote1_mm" ou "cote1" proprement)
-                        clef_propre = str(clef_cote).split('_')[0].lower().strip()
-                        mesure[clef_propre] = clean_val(valeur_cote)
+                    if nom_entete:
+                        clef_exacte = str(nom_entete).strip()
+                        mesure[clef_exacte] = clean_val(valeur_cote)
 
                 toutes_les_mesures.append(mesure)
             except Exception as e:

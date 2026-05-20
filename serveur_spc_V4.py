@@ -118,28 +118,25 @@ def recuperer_historique():
         if not os.path.exists(dossier_cible):
             return jsonify({"status": "success", "data": []})
 
-        # Modification : Recherche de tous les fichiers Excel du dossier (.xlsx et .xlsm)
-        # pour éviter d'ignorer des fichiers à cause d'une extension stricte
         fichiers = glob.glob(os.path.join(dossier_cible, "*.xls*"))
         
         toutes_les_mesures = []
         for fichier in fichiers:
             try:
-                # data_only=True permet de lire le texte/chiffre brut et non la formule Excel
                 wb = load_workbook(fichier, data_only=True)
                 ws = wb.active
                 
-                # Sécurité et formatage de la Date (Openpyxl extrait souvent un objet datetime)
+                # Formatage sécurisé de la date
                 val_date = ws.cell(row=2, column=1).value
                 if isinstance(val_date, datetime):
                     str_date = val_date.strftime("%d/%m/%Y %H:%M")
                 else:
                     str_date = str(val_date) if val_date is not None else ""
 
-                # Nettoyage des valeurs lues (évite d'envoyer 'None' au JavaScript)
                 def clean_val(val):
                     return str(val).strip() if val is not None else ""
 
+                # 1. Base fixe commune à tous les profils
                 mesure = {
                     "date": str_date,
                     "machine": clean_val(ws.cell(row=2, column=2).value),
@@ -149,10 +146,20 @@ def recuperer_historique():
                     "of": clean_val(ws.cell(row=2, column=6).value),
                     "operateur": clean_val(ws.cell(row=2, column=7).value),
                     "lot_matiere_vierge": clean_val(ws.cell(row=2, column=8).value),
-                    "lot_matiere_broye": clean_val(ws.cell(row=2, column=9).value),
-                    "longueur": clean_val(ws.cell(row=2, column=10).value),  # Mappe vers row.longueur (OK/KO ou 270)
-                    "poids": clean_val(ws.cell(row=2, column=11).value)      # Mappe vers row.poids (OK/KO ou 12.4)
+                    "lot_matiere_broye": clean_val(ws.cell(row=2, column=9).value)
                 }
+
+                # 2. LECTURE DYNAMIQUE DES COTES (Colonnes 10 à la fin du fichier Excel)
+                # La ligne 1 contient le nom des clefs enregistrées (ex: cote1, cote2, etc.)
+                for col_idx in range(10, ws.max_column + 1):
+                    clef_cote = ws.cell(row=1, column=col_idx).value
+                    valeur_cote = ws.cell(row=2, column=col_idx).value
+                    
+                    if clef_cote:
+                        # Nettoie la clef (ex: transforme "cote1_mm" ou "cote1" proprement)
+                        clef_propre = str(clef_cote).split('_')[0].lower().strip()
+                        mesure[clef_propre] = clean_val(valeur_cote)
+
                 toutes_les_mesures.append(mesure)
             except Exception as e:
                 print(f"⚠️ Impossible de lire le fichier {fichier} : {str(e)}")

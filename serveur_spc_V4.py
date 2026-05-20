@@ -9,7 +9,7 @@ from flask_cors import CORS
 from openpyxl import Workbook, load_workbook
 
 # =====================================================================
-# 1. CONFIGURATION DES CHEMINS SECURISEE POUR LE .EXE
+# 1. CONFIGURATION DES CHEMINS SÉCURISÉE POUR LE .EXE
 # =====================================================================
 
 def obtenir_dossier_application():
@@ -83,6 +83,7 @@ def save_data():
         wb = Workbook()
         ws = wb.active
 
+        # Entêtes fixes du fichier Excel
         colonnes_fixes = [
             "date", "machine", "designation", "code_article", "filiere", "of", 
             "operateur", "lot_matiere_vierge", "lot_matiere_broye", 
@@ -98,7 +99,7 @@ def save_data():
         chemin_complet = os.path.join(dossier, nom_fichier)
         wb.save(chemin_complet)
 
-        print(f"✅ Fichier enregistre : {nom_fichier}")
+        print(f"✅ Fichier enregistré : {nom_fichier}")
         return jsonify({"status": "success"}), 200
     except Exception as e:
         print(f"❌ Erreur Enregistrement : {str(e)}")
@@ -108,71 +109,87 @@ def save_data():
 @app.route('/recuperer-historique', methods=['POST'])
 def recuperer_historique():
     try:
-        data = request.json
-        filiere = data.get('filiere')
-        annee = datetime.now().year
-
-        dossier_cible = f"W:/Consignes/DFN/Extrusion/SPC/Historique_SPC_Extrusion/{annee}/{filiere}/"
+        data = request.get_json()
+        filiere_selectionnee = data.get('filiere')
+        annee_selectionnee = data.get('annee')
+        
+        dossier_cible = f"W:/Consignes/DFN/Extrusion/SPC/Historique_SPC_Extrusion/{annee_selectionnee}/{filiere_selectionnee}/"
 
         if not os.path.exists(dossier_cible):
             return jsonify({"status": "success", "data": []})
 
-        fichiers = glob.glob(os.path.join(dossier_cible, f"SPC_{filiere}_*.xlsx"))
+        # Modification : Recherche de tous les fichiers Excel du dossier (.xlsx et .xlsm)
+        # pour éviter d'ignorer des fichiers à cause d'une extension stricte
+        fichiers = glob.glob(os.path.join(dossier_cible, "*.xls*"))
         
         toutes_les_mesures = []
         for fichier in fichiers:
             try:
+                # data_only=True permet de lire le texte/chiffre brut et non la formule Excel
                 wb = load_workbook(fichier, data_only=True)
                 ws = wb.active
+                
+                # Sécurité et formatage de la Date (Openpyxl extrait souvent un objet datetime)
+                val_date = ws.cell(row=2, column=1).value
+                if isinstance(val_date, datetime):
+                    str_date = val_date.strftime("%d/%m/%Y %H:%M")
+                else:
+                    str_date = str(val_date) if val_date is not None else ""
+
+                # Nettoyage des valeurs lues (évite d'envoyer 'None' au JavaScript)
+                def clean_val(val):
+                    return str(val).strip() if val is not None else ""
+
                 mesure = {
-                    "date": ws.cell(row=2, column=1).value,
-                    "code_article": ws.cell(row=2, column=4).value,
-                    "filiere": ws.cell(row=2, column=5).value,
-                    "of": ws.cell(row=2, column=6).value,
-                    "operateur": ws.cell(row=2, column=7).value
+                    "date": str_date,
+                    "machine": clean_val(ws.cell(row=2, column=2).value),
+                    "designation": clean_val(ws.cell(row=2, column=3).value),
+                    "code_article": clean_val(ws.cell(row=2, column=4).value),
+                    "filiere": clean_val(ws.cell(row=2, column=5).value),
+                    "of": clean_val(ws.cell(row=2, column=6).value),
+                    "operateur": clean_val(ws.cell(row=2, column=7).value),
+                    "lot_matiere_vierge": clean_val(ws.cell(row=2, column=8).value),
+                    "lot_matiere_broye": clean_val(ws.cell(row=2, column=9).value),
+                    "longueur": clean_val(ws.cell(row=2, column=10).value),  # Mappe vers row.longueur (OK/KO ou 270)
+                    "poids": clean_val(ws.cell(row=2, column=11).value)      # Mappe vers row.poids (OK/KO ou 12.4)
                 }
                 toutes_les_mesures.append(mesure)
-            except Exception:
+            except Exception as e:
+                print(f"⚠️ Impossible de lire le fichier {fichier} : {str(e)}")
                 continue
                 
         return jsonify({"status": "success", "data": toutes_les_mesures}), 200
     except Exception as e:
         print(f"❌ Erreur Lecture Historique : {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
 # =====================================================================
-# 5. ROUTE POUR LES IMAGE
+# 4. ROUTE POUR LES IMAGES
 # =====================================================================
 
 @app.route('/images/<nom_image>')
 def servir_images(nom_image):
     """Va chercher l'image de la filière directement sur le réseau d'usine W:"""
-    # 1. On définit le dossier source sur le réseau W:
     dossier_images = "W:/Consignes/DFN/Extrusion/SPC/Image"
-    
-    # 2. Sécurité : Extraction du nom sans l'extension pour tester .jpg et .jpeg
     nom_base = os.path.splitext(nom_image)[0]
     
-    # On teste le chemin avec .jpg
     chemin_image = os.path.join(dossier_images, f"{nom_base}.jpg")
     
-    # Si le .jpg n'existe pas, on tente le .jpeg
     if not os.path.exists(chemin_image):
         chemin_image = os.path.join(dossier_images, f"{nom_base}.jpeg")
         
-    # 3. Si l'image existe enfin, on la sert au navigateur
     if os.path.exists(chemin_image):
-        ext = os.path.splitext(chemin_image)[1].lower()
-        mimetype = "image/jpeg" # .jpg et .jpeg utilisent le même mimetype
-        
+        mimetype = "image/jpeg"
         with open(chemin_image, 'rb') as f:
             return f.read(), 200, {'Content-Type': mimetype}
             
-    # 4. En cas d'échec total, on écrit l'erreur dans la console de l'exécutable pour le diagnostic
     print(f"❌ Image de filière introuvable sur le réseau W: {nom_base}.jpg (ou .jpeg)")
     return f"Image introuvable dans le dossier {dossier_images}", 404
 
+
 # =====================================================================
-# 4. SCRIPT DE DÉMARRAGE
+# 5. SCRIPT DE DÉMARRAGE
 # =====================================================================
 
 def ouvrir_navigateur():
@@ -182,7 +199,7 @@ if __name__ == "__main__":
     print("==================================================")
     print("        LANCEMENT DU SYSTÈME SPC EXTRUSION        ")
     print("==================================================")
-    print(f"Dossier cible verifie : {DOSSIER_APP}")
+    print(f"Dossier de l'application : {DOSSIER_APP}")
     
     Timer(1, ouvrir_navigateur).start()
     app.run(host='127.0.0.1', port=5000, threaded=True)

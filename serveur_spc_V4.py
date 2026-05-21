@@ -2,11 +2,12 @@ import os
 import sys
 import glob
 import webbrowser
+import sqlite3
+import json
 from datetime import datetime
 from threading import Timer
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from openpyxl import Workbook, load_workbook
 
 # =====================================================================
 # 1. CONFIGURATION DES CHEMINS SÉCURISÉE POUR LE .EXE
@@ -22,10 +23,66 @@ def obtenir_dossier_application():
         return os.path.dirname(os.path.abspath(__file__))
 
 DOSSIER_APP = obtenir_dossier_application()
+DB_PATH = os.path.join(DOSSIER_APP, "base_donnees_spc.db")
 
 app = Flask(__name__)
 CORS(app)
 
+# =====================================================================
+# 1B. INITIALISATION DE LA BASE DE DONNÉES SQLITE
+# =====================================================================
+
+def initialiser_bdd():
+    """Crée la base de données et la table principale si elles n'existent pas"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # Création de la table avec les colonnes de base communes à tous les contrôles
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mesures_spc (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code_article TEXT,
+            designation TEXT,
+            of TEXT,
+            operateur TEXT,
+            machine TEXT,
+            date TEXT,
+            lot_matiere_vierge TEXT,
+            lot_matiere_broye_str TEXT, -- Évite le conflit d'accent
+            longueur_mm TEXT,
+            poids_kg TEXT,
+            colorimetrie_L TEXT,
+            colorimetrie_A TEXT,
+            colorimetrie_B TEXT,
+            observations TEXT,
+            filiere TEXT,
+            annee_liaison INTEGER
+        )
+    """)
+    conn.commit()
+    conn.close()
+    print(f"✅ Base de données SQLite initialisée avec succès au chemin : {DB_PATH}")
+
+initialiser_bdd()
+
+def verifier_et_ajouter_colonnes(cles_mesures):
+    """Vérifie si les colonnes dynamiques (Cotes, Gabarits) existent, sinon les ajoute"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Récupérer la liste des colonnes existantes
+    cursor.execute("PRAGMA table_info(mesures_spc)")
+    colonnes_existantes = [col[1] for col in cursor.fetchall()]
+    
+    for cle in cles_mesures:
+        if cle not in colonnes_existantes:
+            try:
+                cursor.execute(f"ALTER TABLE mesures_spc ADD COLUMN {cle} TEXT")
+                print(f"➕ Nouvelle colonne dynamique ajoutée à la BDD : {cle}")
+            except Exception as e:
+                print(f"❌ Impossible d'ajouter la colonne {cle} : {e}")
+                
+    conn.commit()
+    conn.close()
 
 # =====================================================================
 # 2. ROUTES DE NAVIGATION (Sert les pages HTML directement)
@@ -35,152 +92,129 @@ CORS(app)
 def page_principale():
     """Affiche la page de saisie SPC.html principale"""
     chemin_page = os.path.join(DOSSIER_APP, "SPC.html")
-    
     if not os.path.exists(chemin_page):
-        return f"Erreur 404 : Le fichier de saisie est introuvable au chemin : {chemin_page}", 404
-    
+        return f"Erreur 404 : Le fichier de saisie [SPC.html] est introuvable à : {chemin_page}", 404
     with open(chemin_page, 'r', encoding='utf-8') as f:
         return f.read()
 
-@app.route('/historique_SPC.html')
+@app.route('/historique')
 def page_historique():
-    """Affiche la page d'analyse historique_SPC.html"""
+    """Affiche la page historique_SPC.html"""
     chemin_page = os.path.join(DOSSIER_APP, "historique_SPC.html")
-    
     if not os.path.exists(chemin_page):
-        return f"Erreur 404 : Le fichier d'historique est introuvable au chemin : {chemin_page}", 404
-        
+        return f"Erreur 404 : Le fichier historique [historique_SPC.html] est introuvable à : {chemin_page}", 404
     with open(chemin_page, 'r', encoding='utf-8') as f:
         return f.read()
 
-@app.route('/articles.js')
-def servir_javascript():
-    """Permet aux pages HTML de charger le dictionnaire d'articles"""
-    chemin_js = os.path.join(DOSSIER_APP, "articles.js")
-    
-    if not os.path.exists(chemin_js):
-        return "/* Erreur 404 : Fichier articles.js introuvable */", 404
-        
-    with open(chemin_js, 'r', encoding='utf-8') as f:
-        return f.read(), 200, {'Content-Type': 'application/javascript'}
-
-
 # =====================================================================
-# 3. ROUTES REQUÊTES DONNÉES (Sauvegarde et Lecture Excel)
+# 3. ROUTES API (Enregistrement et Lecture SQLite)
 # =====================================================================
 
-@app.route('/enregistrer-spc', methods=['POST'])
-def save_data():
+@app.route('/enregistrer-spc',尊 methods=['POST'])
+def enregistrer_spc():
+    """Reçoit les données du formulaire SPC.html et les insère en BDD"""
     try:
-        data = request.json
-        dossier = data.get('dossier')
-        nom_fichier = data.get('nomFichier')
-        mesures = data.get('mesures') 
-
-        if not os.path.exists(dossier):
-            os.makedirs(dossier)
-
-        wb = Workbook()
-        ws = wb.active
-
-        # Entêtes fixes du fichier Excel
-        colonnes_fixes = [
-            "date", "machine", "designation", "code_article", "filiere", "of", 
-            "operateur", "lot_matiere_vierge", "lot_matiere_broye", 
-            "longueur_mm", "poids_kg", "colorimetrie_L", "colorimetrie_A", "colorimetrie_B", "observations"
-        ]
-        colonnes_dynamiques = [cle for cle in mesures.keys() if cle not in colonnes_fixes]
-        toutes_les_colonnes = colonnes_fixes + colonnes_dynamiques
+        donnees_recues = request.get_json()
+        if not donnees_recues or 'mesures' not in donnees_recues:
+            return jsonify({"status": "error", "message": "Données manquantes"}), 400
+            
+        mesures = donnees_recues['mesures']
         
-        ws.append(toutes_les_colonnes)
-        valeurs = [mesures.get(colonne, "") for colonne in toutes_les_colonnes]
-        ws.append(valeurs)
+        # Nettoyage des clés pour correspondre aux standards SQL
+        mesures_propres = {}
+        for k, v in mesures.items():
+            cle_propre = k.replace(" ", "_").replace("°", "")
+            # Mapping pour éviter les soucis de propriétés ou d'accents du JS
+            if cle_propre.lower() == "lot_matiere_broye":
+                cle_propre = "lot_matiere_broye_str"
+            mesures_propres[cle_propre] = str(v) if v is not None else ""
 
-        chemin_complet = os.path.join(dossier, nom_fichier)
-        wb.save(chemin_complet)
+        # S'assurer que les colonnes dynamiques de l'objet existent en BDD
+        verifier_et_ajouter_colonnes(mesures_propres.keys())
 
-        print(f"✅ Fichier enregistré : {nom_fichier}")
-        return jsonify({"status": "success"}), 200
+        # Déterminer l'année à partir de la date saisie (Format DD/MM/YYYY HH:MM:SS ou DD/MM/YYYY)
+        annee_controle = datetime.now().year
+        date_saisie = mesures_propres.get('date', '')
+        if date_saisie and '/' in date_saisie:
+            try:
+                annee_controle = int(date_saisie.split('/')[2].split(' ')[0])
+            except Exception:
+                pass
+                
+        mesures_propres['annee_liaison'] = annee_controle
+
+        # Construction dynamique de la requête d'insertion SQL
+        colonnes = ", ".join(mesures_propres.keys())
+        placeholders = ", ".join(["?" for _ in mesures_propres])
+        valeurs = list(mesures_propres.values())
+
+        requete = f"INSERT INTO mesures_spc ({colonnes}) VALUES ({placeholders})"
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(requete, valeurs)
+        conn.commit()
+        conn.close()
+
+        print(f"💾 Contrôle enregistré en BDD avec succès pour l'OF {mesures_propres.get('of')}")
+        return jsonify({"status": "success", "message": "Données enregistrées en BDD."})
+
     except Exception as e:
-        print(f"❌ Erreur Enregistrement : {str(e)}")
+        print(f"❌ Erreur lors de l'enregistrement : {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route('/recuperer-historique', methods=['POST'])
 def recuperer_historique():
+    """Filtre la table SQLite par filière et année et renvoie le tableau au format JSON"""
     try:
-        data = request.get_json()
-        filiere_selectionnee = data.get('filiere')
-        annee_selectionnee = data.get('annee')
-        
-        # Base du chemin réseau
-        base_reseau = "W:/Consignes/DFN/Extrusion/SPC/Historique_SPC_Extrusion"
+        criteres = request.get_json()
+        filiere = criteres.get('filiere', 'TOUS')
+        annee = criteres.get('annee', 'TOUS')
 
-        # 1. CONSTRUCTION DYNAMIQUE DU CHEMIN (Gestion du mot-clé "TOUS")
-        partie_annee = "*" if annee_selectionnee == "TOUS" else annee_selectionnee
-        partie_filiere = "*" if filiere_selectionnee == "TOUS" else filiere_selectionnee
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row  # Permet de récupérer les résultats sous forme de dictionnaire
+        cursor = conn.cursor()
 
-        # Construction du pattern de recherche global
-        # Exemple si TOUS/TOUS : W:/Consignes/DFN/Extrusion/SPC/Historique_SPC_Extrusion/*/*/*.xls*
-        pattern_recherche = os.path.join(base_reseau, partie_annee, partie_filiere, "*.xls*")
-        
-        # Normalisation des slashes pour Windows/Réseau
-        pattern_recherche = pattern_recherche.replace('\\', '/')
+        # Construction dynamique des clauses WHERE
+        clauses = []
+        parametres = []
 
-        # Recherche de tous les fichiers Excel correspondants
-        fichiers = glob.glob(pattern_recherche)
-        
-        toutes_les_mesures = []
-        for fichier in fichiers:
-            try:
-                wb = load_workbook(fichier, data_only=True)
-                ws = wb.active
-                
-                # Formatage sécurisé de la date
-                val_date = ws.cell(row=2, column=1).value
-                if isinstance(val_date, datetime):
-                    str_date = val_date.strftime("%d/%m/%Y %H:%M")
-                else:
-                    str_date = str(val_date) if val_date is not None else ""
+        if filiere != "TOUS":
+            clauses.append("filiere = ?")
+            parametres.append(filiere)
 
-                def clean_val(val):
-                    return str(val).strip() if val is not None else ""
+        if annee != "TOUS":
+            clauses.append("annee_liaison = ?")
+            parametres.append(int(annee))
 
-                # 1. Base fixe commune à tous vos fichiers SPC
-                mesure = {
-                    "date": str_date,
-                    "machine": clean_val(ws.cell(row=2, column=2).value),
-                    "designation": clean_val(ws.cell(row=2, column=3).value),
-                    "code_article": clean_val(ws.cell(row=2, column=4).value),
-                    "filiere": clean_val(ws.cell(row=2, column=5).value),
-                    "of": clean_val(ws.cell(row=2, column=6).value),
-                    "operateur": clean_val(ws.cell(row=2, column=7).value),
-                    "lot_matiere_vierge": clean_val(ws.cell(row=2, column=8).value),
-                    "lot_matiere_broye": clean_val(ws.cell(row=2, column=9).value)
-                }
+        condition_where = ""
+        if clauses:
+            condition_where = "WHERE " + " AND ".join(clauses)
 
-                # 2. LECTURE DYNAMIQUE DES COTES (De la colonne 10 jusqu'à la fin du fichier)
-                for col_idx in range(10, ws.max_column + 1):
-                    nom_entete = ws.cell(row=1, column=col_idx).value
-                    valeur_cote = ws.cell(row=2, column=col_idx).value
-                    
-                    if nom_entete:
-                        clef_exacte = str(nom_entete).strip()
-                        mesure[clef_exacte] = clean_val(valeur_cote)
+        requete = f"SELECT * FROM mesures_spc {condition_where}"
+        cursor.execute(requete, parametres)
+        lignes = cursor.fetchall()
+        conn.close()
 
-                toutes_les_mesures.append(mesure)
-            except Exception as e:
-                print(f"⚠️ Impossible de lire le fichier {fichier} : {str(e)}")
-                continue
-                
-        return jsonify({"status": "success", "data": toutes_les_mesures}), 200
+        # Conversion du format SQLite Row vers une liste de dictionnaires standards pour le JSON
+        liste_donnees = []
+        for l in lignes:
+            d = dict(l)
+            # Réajustement de la clé pour le JavaScript de l'historique
+            if "lot_matiere_broye_str" in d:
+                d["lot_matiere_broye"] = d.pop("lot_matiere_broye_str")
+            liste_donnees.append(d)
+
+        return jsonify({"status": "success", "data": liste_donnees})
+
     except Exception as e:
-        print(f"❌ Erreur Lecture Historique : {str(e)}")
+        print(f"❌ Erreur récupération historique : {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # =====================================================================
-# 4. ROUTE POUR LES IMAGES
+# 4. GESTION DES IMAGES FILIÈRES
 # =====================================================================
 
 @app.route('/images/<nom_image>')
@@ -190,14 +224,12 @@ def servir_images(nom_image):
     nom_base = os.path.splitext(nom_image)[0]
     
     chemin_image = os.path.join(dossier_images, f"{nom_base}.jpg")
-    
     if not os.path.exists(chemin_image):
         chemin_image = os.path.join(dossier_images, f"{nom_base}.jpeg")
         
     if os.path.exists(chemin_image):
-        mimetype = "image/jpeg"
         with open(chemin_image, 'rb') as f:
-            return f.read(), 200, {'Content-Type': mimetype}
+            return f.read(), 200, {'Content-Type': 'image/jpeg'}
             
     print(f"❌ Image de filière introuvable sur le réseau W: {nom_base}.jpg (ou .jpeg)")
     return f"Image introuvable dans le dossier {dossier_images}", 404
@@ -211,10 +243,8 @@ def ouvrir_navigateur():
     webbrowser.open("http://127.0.0.1:5000/")
 
 if __name__ == "__main__":
-    print("==================================================")
-    print("        LANCEMENT DU SYSTÈME SPC EXTRUSION        ")
-    print("==================================================")
-    print(f"Dossier de l'application : {DOSSIER_APP}")
-    
+    # Ouvre automatiquement la page après un délai d'une seconde
     Timer(1, ouvrir_navigateur).start()
-    app.run(host='127.0.0.1', port=5000, threaded=True)
+    
+    # Lancement de l'application Flask
+    app.run(host="127.0.0.1", port=5000, debug=False)

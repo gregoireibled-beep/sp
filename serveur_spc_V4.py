@@ -113,13 +113,22 @@ def recuperer_historique():
         filiere_selectionnee = data.get('filiere')
         annee_selectionnee = data.get('annee')
         
-        dossier_cible = f"W:/Consignes/DFN/Extrusion/SPC/Historique_SPC_Extrusion/{annee_selectionnee}/{filiere_selectionnee}/"
+        # Base du chemin réseau
+        base_reseau = "W:/Consignes/DFN/Extrusion/SPC/Historique_SPC_Extrusion"
 
-        if not os.path.exists(dossier_cible):
-            return jsonify({"status": "success", "data": []})
+        # 1. CONSTRUCTION DYNAMIQUE DU CHEMIN (Gestion du mot-clé "TOUS")
+        partie_annee = "*" if annee_selectionnee == "TOUS" else annee_selectionnee
+        partie_filiere = "*" if filiere_selectionnee == "TOUS" else filiere_selectionnee
 
-        # Recherche de tous les fichiers Excel du dossier
-        fichiers = glob.glob(os.path.join(dossier_cible, "*.xls*"))
+        # Construction du pattern de recherche global
+        # Exemple si TOUS/TOUS : W:/Consignes/DFN/Extrusion/SPC/Historique_SPC_Extrusion/*/*/*.xls*
+        pattern_recherche = os.path.join(base_reseau, partie_annee, partie_filiere, "*.xls*")
+        
+        # Normalisation des slashes pour Windows/Réseau
+        pattern_recherche = pattern_recherche.replace('\\', '/')
+
+        # Recherche de tous les fichiers Excel correspondants
+        fichiers = glob.glob(pattern_recherche)
         
         toutes_les_mesures = []
         for fichier in fichiers:
@@ -150,8 +159,7 @@ def recuperer_historique():
                     "lot_matiere_broye": clean_val(ws.cell(row=2, column=9).value)
                 }
 
-                # 2. LECTURE DYNAMIQE DES COTES (De la colonne 10 jusqu'à la fin du fichier)
-                # On associe la valeur de la ligne 2 avec le nom exact de l'entête à la ligne 1
+                # 2. LECTURE DYNAMIQUE DES COTES (De la colonne 10 jusqu'à la fin du fichier)
                 for col_idx in range(10, ws.max_column + 1):
                     nom_entete = ws.cell(row=1, column=col_idx).value
                     valeur_cote = ws.cell(row=2, column=col_idx).value

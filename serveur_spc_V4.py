@@ -105,7 +105,17 @@ def page_historique():
         return f"Erreur 404 : Le fichier historique [historique_SPC.html] est introuvable à : {chemin_page}", 404
     with open(chemin_page, 'r', encoding='utf-8') as f:
         return f.read()
-
+@app.route('/articles.js')
+def servir_articles_js():
+    """Sert le fichier de configuration des articles et filières au format JavaScript"""
+    chemin_script = os.path.join(DOSSIER_APP, "articles.js")
+    if not os.path.exists(chemin_script):
+        print(f"❌ Fichier [articles.js] introuvable au chemin : {chemin_script}")
+        return "Erreur 404 : Le fichier articles.js est introuvable sur le serveur.", 404
+    
+    with open(chemin_script, 'r', encoding='utf-8') as f:
+        return f.read(), 200, {'Content-Type': 'application/javascript'}
+        
 # =====================================================================
 # 3. ROUTES API (Enregistrement et Lecture SQLite)
 # =====================================================================

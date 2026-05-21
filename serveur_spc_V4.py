@@ -110,7 +110,7 @@ def page_historique():
 # 3. ROUTES API (Enregistrement et Lecture SQLite)
 # =====================================================================
 
-@app.route('/enregistrer-spc',尊 methods=['POST'])
+@app.route('/enregistrer-spc', methods=['POST'])
 def enregistrer_spc():
     """Reçoit les données du formulaire SPC.html et les insère en BDD"""
     try:

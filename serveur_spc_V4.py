@@ -105,6 +105,7 @@ def page_historique():
         return f"Erreur 404 : Le fichier historique [historique_SPC.html] est introuvable à : {chemin_page}", 404
     with open(chemin_page, 'r', encoding='utf-8') as f:
         return f.read()
+
 @app.route('/articles.js')
 def servir_articles_js():
     """Sert le fichier de configuration des articles et filières au format JavaScript"""
@@ -173,55 +174,56 @@ def enregistrer_spc():
         print(f"❌ Erreur lors de l'enregistrement : {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-    @app.route('/recuperer-historique', methods=['POST'])
-    def recuperer_historique():
-        """Filtre la table SQLite par filière et année et renvoie le tableau au format JSON"""
-        try:
-            criteres = request.get_json()
-            filiere = criteres.get('filiere', 'TOUS')
-            annee = criteres.get('annee', 'TOUS')
 
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row  # Permet de récupérer les résultats sous forme de dictionnaire
-            cursor = conn.cursor()
+@app.route('/recuperer-historique', methods=['POST'])
+def recuperer_historique():
+    """Filtre la table SQLite par filière et année et renvoie le tableau au format JSON"""
+    try:
+        criteres = request.get_json()
+        filiere = criteres.get('filiere', 'TOUS')
+        annee = criteres.get('annee', 'TOUS')
 
-            # Construction dynamique des clauses WHERE
-            clauses = []
-            parametres = []
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row  # Permet de récupérer les résultats sous forme de dictionnaire
+        cursor = conn.cursor()
 
-            if filiere != "TOUS":
-                clauses.append("filiere = ?")
-                parametres.append(filiere)
+        # Construction dynamique des clauses WHERE
+        clauses = []
+        parametres = []
 
-            if annee != "TOUS":
-                clauses.append("annee_liaison = ?")
-                parametres.append(int(annee))
+        if filiere != "TOUS":
+            clauses.append("filiere = ?")
+            parametres.append(filiere)
 
-            condition_where = ""
-            if clauses:
-                condition_where = "WHERE " + " AND ".join(clauses)
+        if annee != "TOUS":
+            clauses.append("annee_liaison = ?")
+            parametres.append(int(annee))
 
-            requete = f"SELECT * FROM mesures_spc {condition_where}"
-            cursor.execute(requete, parametres)
-            
-            lignes = cursor.fetchall()
-            conn.close()
+        condition_where = ""
+        if clauses:
+            condition_where = "WHERE " + " AND ".join(clauses)
 
-            # Conversion optimisée du format SQLite Row vers une liste de dictionnaires standards
-            liste_donnees = []
-            for l in lignes:
-                d = dict(l)
-                # Réajustement de la clé pour le JavaScript de l'historique
-                if "lot_matiere_broye_str" in d:
-                    d["lot_matiere_broye"] = d["lot_matiere_broye_str"]
-                    del d["lot_matiere_broye_str"]
-                liste_donnees.append(d)
+        requete = f"SELECT * FROM mesures_spc {condition_where}"
+        cursor.execute(requete, parametres)
+        
+        lignes = cursor.fetchall()
+        conn.close()
 
-            return jsonify({"status": "success", "data": liste_donnees})
+        # Conversion optimisée du format SQLite Row vers une liste de dictionnaires standards
+        liste_donnees = []
+        for l in lignes:
+            d = dict(l)
+            # Réajustement de la clé pour le JavaScript de l'historique
+            if "lot_matiere_broye_str" in d:
+                d["lot_matiere_broye"] = d["lot_matiere_broye_str"]
+                del d["lot_matiere_broye_str"]
+            liste_donnees.append(d)
 
-        except Exception as e:
-            print(f"❌ Erreur récupération historique : {str(e)}")
-            return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"status": "success", "data": liste_donnees})
+
+    except Exception as e:
+        print(f"❌ Erreur récupération historique : {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # =====================================================================
@@ -257,6 +259,5 @@ if __name__ == "__main__":
     # Ouvre automatiquement la page après un délai d'une seconde
     Timer(1, ouvrir_navigateur).start()
     
-# REMPLACEZ : app.run(host="127.0.0.1", port=5000, debug=False)
-# PAR CECI :
-app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+    # Lancement de l'application Flask avec le multi-threading activé
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

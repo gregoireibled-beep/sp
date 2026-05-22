@@ -177,15 +177,25 @@ def enregistrer_spc():
 
 @app.route('/recuperer-historique', methods=['POST'])
 def recuperer_historique():
-    """Filtre la table SQLite par filière et année et renvoie le tableau au format JSON"""
+    """Filtre la table SQLite par filière et année et renvoie le tableau au format JSON avec optimisations"""
     try:
         criteres = request.get_json()
         filiere = criteres.get('filiere', 'TOUS')
         annee = criteres.get('annee', 'TOUS')
 
         conn = sqlite3.connect(DB_PATH)
+        
+        # ⚡ CONFIGURATION PRAGMA POUR ACCÉLÉRER LE CHARGEMENT DES COTES ⚡
+        conn.execute("PRAGMA journal_mode=WAL;")  # Mode d'écriture parallèle
+        conn.execute("PRAGMA synchronous=OFF;")   # Accélère les accès disque
+        conn.execute("PRAGMA cache_size=-4000;")  # Réserve 4Mo de mémoire cache pour les requêtes complexes
+        
         conn.row_factory = sqlite3.Row  # Permet de récupérer les résultats sous forme de dictionnaire
         cursor = conn.cursor()
+
+        # 🔑 INDEX DE PERFORMANCE AUTOMATIQUE
+        # Indexation intelligente sur la filière et l'année pour cibler immédiatement les bonnes lignes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_filiere_annee ON mesures_spc (filiere, annee_liaison);")
 
         # Construction dynamique des clauses WHERE
         clauses = []
@@ -203,13 +213,14 @@ def recuperer_historique():
         if clauses:
             condition_where = "WHERE " + " AND ".join(clauses)
 
+        # On maintient SELECT * pour capturer dynamiquement toutes les cotes et tous les gabarits
         requete = f"SELECT * FROM mesures_spc {condition_where}"
         cursor.execute(requete, parametres)
         
         lignes = cursor.fetchall()
         conn.close()
 
-        # Conversion optimisée du format SQLite Row vers une liste de dictionnaires standards
+        # Conversion rapide et propre des lignes de la table vers le dictionnaire JSON
         liste_donnees = []
         for l in lignes:
             d = dict(l)

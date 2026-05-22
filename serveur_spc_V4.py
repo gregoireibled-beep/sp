@@ -173,60 +173,55 @@ def enregistrer_spc():
         print(f"❌ Erreur lors de l'enregistrement : {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+    @app.route('/recuperer-historique', methods=['POST'])
+    def recuperer_historique():
+        """Filtre la table SQLite par filière et année et renvoie le tableau au format JSON"""
+        try:
+            criteres = request.get_json()
+            filiere = criteres.get('filiere', 'TOUS')
+            annee = criteres.get('annee', 'TOUS')
 
-@app.route('/recuperer-historique', methods=['POST'])
-def recuperer_historique():
-    """Filtre la table SQLite par filière et année et renvoie le tableau au format JSON"""
-    try:
-        criteres = request.get_json()
-        filiere = criteres.get('filiere', 'TOUS')
-        annee = criteres.get('annee', 'TOUS')
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row  # Permet de récupérer les résultats sous forme de dictionnaire
+            cursor = conn.cursor()
 
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row  # Permet de récupérer les résultats sous forme de dictionnaire
-        cursor = conn.cursor()
+            # Construction dynamique des clauses WHERE
+            clauses = []
+            parametres = []
 
-        # Construction dynamique des clauses WHERE
-        clauses = []
-        parametres = []
+            if filiere != "TOUS":
+                clauses.append("filiere = ?")
+                parametres.append(filiere)
 
-        if filiere != "TOUS":
-            clauses.append("filiere = ?")
-            parametres.append(filiere)
+            if annee != "TOUS":
+                clauses.append("annee_liaison = ?")
+                parametres.append(int(annee))
 
-        if annee != "TOUS":
-            clauses.append("annee_liaison = ?")
-            parametres.append(int(annee))
+            condition_where = ""
+            if clauses:
+                condition_where = "WHERE " + " AND ".join(clauses)
 
-        condition_where = ""
-        if clauses:
-            condition_where = "WHERE " + " AND ".join(clauses)
+            requete = f"SELECT * FROM mesures_spc {condition_where}"
+            cursor.execute(requete, parametres)
+            
+            lignes = cursor.fetchall()
+            conn.close()
 
-        requete = f"SELECT * FROM mesures_spc {condition_where}"
-        cursor.execute(requete, parametres)
-        lignes = cursor.fetchall()
-        conn.close()
+            # Conversion optimisée du format SQLite Row vers une liste de dictionnaires standards
+            liste_donnees = []
+            for l in lignes:
+                d = dict(l)
+                # Réajustement de la clé pour le JavaScript de l'historique
+                if "lot_matiere_broye_str" in d:
+                    d["lot_matiere_broye"] = d["lot_matiere_broye_str"]
+                    del d["lot_matiere_broye_str"]
+                liste_donnees.append(d)
 
-    # Dans @app.route('/recuperer-historique', methods=['POST'])
-    # Remplacez votre bloc de conversion par celui-ci, plus performant :
+            return jsonify({"status": "success", "data": liste_donnees})
 
-    lignes = cursor.fetchall()
-    conn.close()
-
-    liste_donnees = []
-    for l in lignes:
-        d = dict(l)
-        # On vérifie proprement sans faire planter ou ralentir
-        if "lot_matiere_broye_str" in d:
-            d["lot_matiere_broye"] = d["lot_matiere_broye_str"]
-            del d["lot_matiere_broye_str"]
-        liste_donnees.append(d)
-
-    return jsonify({"status": "success", "data": liste_donnees})
-
-    except Exception as e:
-        print(f"❌ Erreur récupération historique : {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        except Exception as e:
+            print(f"❌ Erreur récupération historique : {str(e)}")
+            return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # =====================================================================

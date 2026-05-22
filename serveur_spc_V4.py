@@ -16,10 +16,8 @@ from flask_cors import CORS
 def obtenir_dossier_application():
     """Détermine le dossier réel contenant les fichiers HTML et JS"""
     if getattr(sys, 'frozen', False):
-        # Si c'est l'exécutable compilé
         return os.path.dirname(sys.executable)
     else:
-        # Si c'est le script de développement .py
         return os.path.dirname(os.path.abspath(__file__))
 
 DOSSIER_APP = obtenir_dossier_application()
@@ -29,14 +27,14 @@ app = Flask(__name__)
 CORS(app)
 
 # =====================================================================
-# 1B. INITIALISATION DE LA BASE DE DONNÉES SQLITE
+# 1B. INITIALISATION DE LA BASE DE DONNÉES SQLITE (STRUCTURE FIXE)
 # =====================================================================
 
 def initialiser_bdd():
-    """Crée la base de données et la table principale si elles n'existent pas"""
+    """Crée la base de données avec une structure fixe et performante"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # Création de la table avec les colonnes de base communes à tous les contrôles
+    # Création de la table avec une colonne dédiée au stockage des cotes dynamiques en JSON
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mesures_spc (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +45,7 @@ def initialiser_bdd():
             machine TEXT,
             date TEXT,
             lot_matiere_vierge TEXT,
-            lot_matiere_broye_str TEXT, -- Évite le conflit d'accent
+            lot_matiere_broye_str TEXT,
             longueur_mm TEXT,
             poids_kg TEXT,
             colorimetrie_L TEXT,
@@ -55,34 +53,17 @@ def initialiser_bdd():
             colorimetrie_B TEXT,
             observations TEXT,
             filiere TEXT,
-            annee_liaison INTEGER
+            annee_liaison INTEGER,
+            cotes_gabarits TEXT -- Stockera toutes les cotes dynamiques au format JSON texto
         )
     """)
+    # Création de l'index pour accélérer la lecture par les utilisateurs de l'historique
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_filiere_annee ON mesures_spc (filiere, annee_liaison);")
     conn.commit()
     conn.close()
-    print(f"✅ Base de données SQLite initialisée avec succès au chemin : {DB_PATH}")
+    print(f"✅ Base de données SQLite initialisée et optimisée à : {DB_PATH}")
 
 initialiser_bdd()
-
-def verifier_et_ajouter_colonnes(cles_mesures):
-    """Vérifie si les colonnes dynamiques (Cotes, Gabarits) existent, sinon les ajoute"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Récupérer la liste des colonnes existantes
-    cursor.execute("PRAGMA table_info(mesures_spc)")
-    colonnes_existantes = [col[1] for col in cursor.fetchall()]
-    
-    for cle in cles_mesures:
-        if cle not in colonnes_existantes:
-            try:
-                cursor.execute(f"ALTER TABLE mesures_spc ADD COLUMN {cle} TEXT")
-                print(f"➕ Nouvelle colonne dynamique ajoutée à la BDD : {cle}")
-            except Exception as e:
-                print(f"❌ Impossible d'ajouter la colonne {cle} : {e}")
-                
-    conn.commit()
-    conn.close()
 
 # =====================================================================
 # 2. ROUTES DE NAVIGATION (Sert les pages HTML directement)
@@ -90,40 +71,35 @@ def verifier_et_ajouter_colonnes(cles_mesures):
 
 @app.route('/')
 def page_principale():
-    """Affiche la page de saisie SPC.html principale"""
     chemin_page = os.path.join(DOSSIER_APP, "SPC.html")
     if not os.path.exists(chemin_page):
-        return f"Erreur 404 : Le fichier de saisie [SPC.html] est introuvable à : {chemin_page}", 404
+        return f"Erreur 404 : Le fichier [SPC.html] est introuvable.", 404
     with open(chemin_page, 'r', encoding='utf-8') as f:
         return f.read()
 
 @app.route('/historique')
 def page_historique():
-    """Affiche la page historique_SPC.html"""
     chemin_page = os.path.join(DOSSIER_APP, "historique_SPC.html")
     if not os.path.exists(chemin_page):
-        return f"Erreur 404 : Le fichier historique [historique_SPC.html] est introuvable à : {chemin_page}", 404
+        return f"Erreur 404 : Le fichier [historique_SPC.html] est introuvable.", 404
     with open(chemin_page, 'r', encoding='utf-8') as f:
         return f.read()
 
 @app.route('/articles.js')
 def servir_articles_js():
-    """Sert le fichier de configuration des articles et filières au format JavaScript"""
     chemin_script = os.path.join(DOSSIER_APP, "articles.js")
     if not os.path.exists(chemin_script):
-        print(f"❌ Fichier [articles.js] introuvable au chemin : {chemin_script}")
-        return "Erreur 404 : Le fichier articles.js est introuvable sur le serveur.", 404
-    
+        return "Erreur 404 : Le fichier articles.js est introuvable.", 404
     with open(chemin_script, 'r', encoding='utf-8') as f:
         return f.read(), 200, {'Content-Type': 'application/javascript'}
         
 # =====================================================================
-# 3. ROUTES API (Enregistrement et Lecture SQLite)
+# 3. ROUTES API (Enregistrement et Lecture SQLite Optimisées)
 # =====================================================================
 
 @app.route('/enregistrer-spc', methods=['POST'])
 def enregistrer_spc():
-    """Reçoit les données du formulaire SPC.html et les insère en BDD"""
+    """Reçoit les données et sépare le standard du dynamique pour le stocker proprement"""
     try:
         donnees_recues = request.get_json()
         if not donnees_recues or 'mesures' not in donnees_recues:
@@ -131,33 +107,47 @@ def enregistrer_spc():
             
         mesures = donnees_recues['mesures']
         
-        # Nettoyage des clés pour correspondre aux standards SQL
-        mesures_propres = {}
+        # 1. Liste des colonnes fixes standards en BDD
+        colonnes_standards = [
+            "code_article", "designation", "of", "operateur", "machine", "date",
+            "lot_matiere_vierge", "longueur_mm", "poids_kg", "colorimetrie_L",
+            "colorimetrie_A", "colorimetrie_B", "observations", "filiere"
+        ]
+        
+        donnees_fixes = {}
+        donnees_dynamiques = {}
+        
+        # Triage des données reçues du JS
         for k, v in mesures.items():
             cle_propre = k.replace(" ", "_").replace("°", "")
-            # Mapping pour éviter les soucis de propriétés ou d'accents du JS
+            valeur_str = str(v) if v is not None else ""
+            
             if cle_propre.lower() == "lot_matiere_broye":
-                cle_propre = "lot_matiere_broye_str"
-            mesures_propres[cle_propre] = str(v) if v is not None else ""
+                donnees_fixes["lot_matiere_broye_str"] = valeur_str
+            elif cle_propre in colonnes_standards:
+                donnees_fixes[cle_propre] = valeur_str
+            else:
+                # Tout ce qui n'est pas standard (Cotes, Gabarits...) va ici
+                if valeur_str != "": 
+                    donnees_dynamiques[cle_propre] = valeur_str
 
-        # S'assurer que les colonnes dynamiques de l'objet existent en BDD
-        verifier_et_ajouter_colonnes(mesures_propres.keys())
-
-        # Déterminer l'année à partir de la date saisie (Format DD/MM/YYYY HH:MM:SS ou DD/MM/YYYY)
+        # Calcul de l'année
         annee_controle = datetime.now().year
-        date_saisie = mesures_propres.get('date', '')
+        date_saisie = donnees_fixes.get('date', '')
         if date_saisie and '/' in date_saisie:
             try:
                 annee_controle = int(date_saisie.split('/')[2].split(' ')[0])
             except Exception:
                 pass
-                
-        mesures_propres['annee_liaison'] = annee_controle
+        donnees_fixes['annee_liaison'] = annee_controle
+        
+        # On transforme le dictionnaire de cotes en une seule chaîne de texte JSON
+        donnees_fixes['cotes_gabarits'] = json.dumps(donnees_dynamiques)
 
-        # Construction dynamique de la requête d'insertion SQL
-        colonnes = ", ".join(mesures_propres.keys())
-        placeholders = ", ".join(["?" for _ in mesures_propres])
-        valeurs = list(mesures_propres.values())
+        # Construction de la requête SQL d'insertion
+        colonnes = ", ".join(donnees_fixes.keys())
+        placeholders = ", ".join(["?" for _ in donnees_fixes])
+        valeurs = list(donnees_fixes.values())
 
         requete = f"INSERT INTO mesures_spc ({colonnes}) VALUES ({placeholders})"
         
@@ -167,8 +157,8 @@ def enregistrer_spc():
         conn.commit()
         conn.close()
 
-        print(f"💾 Contrôle enregistré en BDD avec succès pour l'OF {mesures_propres.get('of')}")
-        return jsonify({"status": "success", "message": "Données enregistrées en BDD."})
+        print(f"💾 Enregistré avec succès (Structure JSON) pour l'OF {donnees_fixes.get('of')}")
+        return jsonify({"status": "success", "message": "Données enregistrées."})
 
     except Exception as e:
         print(f"❌ Erreur lors de l'enregistrement : {str(e)}")
@@ -177,34 +167,21 @@ def enregistrer_spc():
 
 @app.route('/recuperer-historique', methods=['POST'])
 def recuperer_historique():
-    """Filtre la table SQLite par filière et année et renvoie le tableau au format JSON avec optimisations"""
+    """Filtre la table et ré-injecte les cotes à plat pour que le JavaScript ne voie aucune différence"""
     try:
         criteres = request.get_json()
         filiere = criteres.get('filiere', 'TOUS')
         annee = criteres.get('annee', 'TOUS')
 
         conn = sqlite3.connect(DB_PATH)
-        
-        # ⚡ CONFIGURATION PRAGMA POUR ACCÉLÉRER LE CHARGEMENT DES COTES ⚡
-        conn.execute("PRAGMA journal_mode=WAL;")  # Mode d'écriture parallèle
-        conn.execute("PRAGMA synchronous=OFF;")   # Accélère les accès disque
-        conn.execute("PRAGMA cache_size=-4000;")  # Réserve 4Mo de mémoire cache pour les requêtes complexes
-        
-        conn.row_factory = sqlite3.Row  # Permet de récupérer les résultats sous forme de dictionnaire
+        conn.row_factory = sqlite3.Row  
         cursor = conn.cursor()
 
-        # 🔑 INDEX DE PERFORMANCE AUTOMATIQUE
-        # Indexation intelligente sur la filière et l'année pour cibler immédiatement les bonnes lignes
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_filiere_annee ON mesures_spc (filiere, annee_liaison);")
-
-        # Construction dynamique des clauses WHERE
         clauses = []
         parametres = []
-
         if filiere != "TOUS":
             clauses.append("filiere = ?")
             parametres.append(filiere)
-
         if annee != "TOUS":
             clauses.append("annee_liaison = ?")
             parametres.append(int(annee))
@@ -213,21 +190,29 @@ def recuperer_historique():
         if clauses:
             condition_where = "WHERE " + " AND ".join(clauses)
 
-        # On maintient SELECT * pour capturer dynamiquement toutes les cotes et tous les gabarits
         requete = f"SELECT * FROM mesures_spc {condition_where}"
         cursor.execute(requete, parametres)
-        
         lignes = cursor.fetchall()
         conn.close()
 
-        # Conversion rapide et propre des lignes de la table vers le dictionnaire JSON
         liste_donnees = []
         for l in lignes:
             d = dict(l)
-            # Réajustement de la clé pour le JavaScript de l'historique
+            
+            # Récupération et déploiement des cotes dynamiques stockées en JSON
+            if "cotes_gabarits" in d and d["cotes_gabarits"]:
+                try:
+                    cotes_extraites = json.loads(d["cotes_gabarits"])
+                    # On fusionne les cotes directement dans l'objet pour le tableau HTML
+                    d.update(cotes_extraites)
+                except Exception:
+                    pass
+                del d["cotes_gabarits"] # On nettoie la clé technique JSON devenue inutile
+
             if "lot_matiere_broye_str" in d:
                 d["lot_matiere_broye"] = d["lot_matiere_broye_str"]
                 del d["lot_matiere_broye_str"]
+                
             liste_donnees.append(d)
 
         return jsonify({"status": "success", "data": liste_donnees})
@@ -236,28 +221,21 @@ def recuperer_historique():
         print(f"❌ Erreur récupération historique : {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
 # =====================================================================
 # 4. GESTION DES IMAGES FILIÈRES
 # =====================================================================
 
 @app.route('/images/<nom_image>')
 def servir_images(nom_image):
-    """Va chercher l'image de la filière directement sur le réseau d'usine W:"""
     dossier_images = "W:/Consignes/DFN/Extrusion/SPC/Image"
     nom_base = os.path.splitext(nom_image)[0]
-    
     chemin_image = os.path.join(dossier_images, f"{nom_base}.jpg")
     if not os.path.exists(chemin_image):
         chemin_image = os.path.join(dossier_images, f"{nom_base}.jpeg")
-        
     if os.path.exists(chemin_image):
         with open(chemin_image, 'rb') as f:
             return f.read(), 200, {'Content-Type': 'image/jpeg'}
-            
-    print(f"❌ Image de filière introuvable sur le réseau W: {nom_base}.jpg (ou .jpeg)")
-    return f"Image introuvable dans le dossier {dossier_images}", 404
-
+    return "Image introuvable", 404
 
 # =====================================================================
 # 5. SCRIPT DE DÉMARRAGE
@@ -267,8 +245,5 @@ def ouvrir_navigateur():
     webbrowser.open("http://127.0.0.1:5000/")
 
 if __name__ == "__main__":
-    # Ouvre automatiquement la page après un délai d'une seconde
     Timer(1, ouvrir_navigateur).start()
-    
-    # Lancement de l'application Flask avec le multi-threading activé
-    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

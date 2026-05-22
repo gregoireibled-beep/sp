@@ -207,16 +207,22 @@ def recuperer_historique():
         lignes = cursor.fetchall()
         conn.close()
 
-        # Conversion du format SQLite Row vers une liste de dictionnaires standards pour le JSON
-        liste_donnees = []
-        for l in lignes:
-            d = dict(l)
-            # Réajustement de la clé pour le JavaScript de l'historique
-            if "lot_matiere_broye_str" in d:
-                d["lot_matiere_broye"] = d.pop("lot_matiere_broye_str")
-            liste_donnees.append(d)
+    # Dans @app.route('/recuperer-historique', methods=['POST'])
+    # Remplacez votre bloc de conversion par celui-ci, plus performant :
 
-        return jsonify({"status": "success", "data": liste_donnees})
+    lignes = cursor.fetchall()
+    conn.close()
+
+    liste_donnees = []
+    for l in lignes:
+        d = dict(l)
+        # On vérifie proprement sans faire planter ou ralentir
+        if "lot_matiere_broye_str" in d:
+            d["lot_matiere_broye"] = d["lot_matiere_broye_str"]
+            del d["lot_matiere_broye_str"]
+        liste_donnees.append(d)
+
+    return jsonify({"status": "success", "data": liste_donnees})
 
     except Exception as e:
         print(f"❌ Erreur récupération historique : {str(e)}")
@@ -256,5 +262,6 @@ if __name__ == "__main__":
     # Ouvre automatiquement la page après un délai d'une seconde
     Timer(1, ouvrir_navigateur).start()
     
-    # Lancement de l'application Flask
-    app.run(host="127.0.0.1", port=5000, debug=False)
+# REMPLACEZ : app.run(host="127.0.0.1", port=5000, debug=False)
+# PAR CECI :
+app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
